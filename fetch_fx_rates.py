@@ -17,6 +17,7 @@ import argparse
 import logging
 import sys
 import time
+import urllib.parse
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -55,11 +56,21 @@ log = logging.getLogger(__name__)
 # API helpers
 # ---------------------------------------------------------------------------
 
+def _build_url(base: str, params: dict) -> str:
+    """Build URL keeping OData special chars ($, @, ') unencoded."""
+    qs = "&".join(
+        f"{k}={urllib.parse.quote(str(v), safe='@$,\\'')}"
+        for k, v in params.items()
+    )
+    return f"{base}?{qs}"
+
+
 def _get(url: str, params: dict | None = None) -> dict:
     """GET with retry + exponential back-off."""
+    full_url = _build_url(url, params) if params else url
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
-            resp = SESSION.get(url, params=params, timeout=30)
+            resp = SESSION.get(full_url, timeout=30)
             if resp.status_code == 429:
                 wait = RETRY_BACKOFF ** attempt
                 log.warning("Rate-limited – sleeping %.0fs", wait)

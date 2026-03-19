@@ -56,10 +56,12 @@ log = logging.getLogger(__name__)
 # API helpers
 # ---------------------------------------------------------------------------
 
+_ODATA_SAFE = "@$,'"
+
 def _build_url(base: str, params: dict) -> str:
     """Build URL keeping OData special chars ($, @, ') unencoded."""
     qs = "&".join(
-        f"{k}={urllib.parse.quote(str(v), safe='@$,\\'')}"
+        f"{k}={urllib.parse.quote(str(v), safe=_ODATA_SAFE)}"
         for k, v in params.items()
     )
     return f"{base}?{qs}"

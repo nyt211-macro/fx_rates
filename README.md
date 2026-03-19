@@ -95,11 +95,11 @@ One row per date, one column per currency code containing the **sell rate**.
 ## Data source
 
 Banco Central do Brasil – PTAX OData service
-`https://olinda.bcb.gov.br/olinda/service/PTAX/version/v1/odata/`
+`https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/`
 
 Key endpoints used:
 
 | Endpoint | Purpose |
 |----------|---------|
 | `Moedas` | List all available currencies |
-| `CotacaoMoedaPeriodo(moeda,dataInicial,dataFinal)` | Rates for one currency over a date range |
+| `CotacaoMoedaPeriodo(moeda,dataInicial,dataFinalCotacao)` | Rates for one currency over a date range |

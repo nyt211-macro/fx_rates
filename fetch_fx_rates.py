@@ -4,7 +4,7 @@ BCB PTAX FX Rates Dataset Builder
 Fetches USD parity exchange rates for all currencies available
 in the Banco Central do Brasil (BCB) PTAX API.
 
-API: https://olinda.bcb.gov.br/olinda/service/PTAX/version/v1/odata/
+API: https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/
 Docs: https://opendata.bcb.gov.br/en/dataset/exchange-rates-daily-bulletins
 
 Usage:
@@ -28,7 +28,7 @@ import requests
 # Configuration
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://olinda.bcb.gov.br/olinda/service/PTAX/version/v1/odata"
+BASE_URL = "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata"
 SESSION = requests.Session()
 SESSION.headers.update(
     {
@@ -107,12 +107,12 @@ def fetch_currency_period(currency: str, start: date, end: date) -> pd.DataFrame
     """
     url = (
         f"{BASE_URL}/CotacaoMoedaPeriodo"
-        f"(moeda=@moeda,dataInicial=@dataInicial,dataFinal=@dataFinal)"
+        f"(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
     )
     params = {
         "@moeda": f"'{currency}'",
         "@dataInicial": f"'{start.strftime('%m-%d-%Y')}'",
-        "@dataFinal": f"'{end.strftime('%m-%d-%Y')}'",
+        "@dataFinalCotacao": f"'{end.strftime('%m-%d-%Y')}'",
         "$format": "json",
         "$select": "cotacaoCompra,cotacaoVenda,dataHoraCotacao,tipoBoletim",
     }

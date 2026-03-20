@@ -1,16 +1,33 @@
 """
 BCB PTAX FX Rates Dataset Builder
 ==================================
-Fetches USD parity exchange rates for all currencies available
-in the Banco Central do Brasil (BCB) PTAX API.
+Fetches USD-parity exchange rates for currencies available in the
+Banco Central do Brasil (BCB) PTAX API.
 
 API: https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/
 Docs: https://opendata.bcb.gov.br/en/dataset/exchange-rates-daily-bulletins
 
+Currency parity types
+---------------------
+The BCB classifies each currency with a ``tipoMoeda`` field:
+
+  Type A – USD parity
+    Rates are expressed as **USD per 1 unit of the foreign currency**.
+    Examples: EUR, GBP, AUD, CAD, CHF, JPY, NZD, SEK, DKK, NOK, XDR …
+    These are the currencies fetched by default (``--parity A``).
+
+  Type B – BRL parity
+    Rates are expressed as **BRL per 1 unit of the foreign currency**
+    (or BRL per USD for the USD line itself).
+    Examples: USD, ARS, MXN, CLP, COP, CNY, KRW, INR, TRY, RUB …
+    Include these with ``--parity B`` or ``--parity AB``.
+
 Usage:
     python fetch_fx_rates.py [--start YYYY-MM-DD] [--end YYYY-MM-DD]
                              [--output data/fx_rates.csv] [--format csv|parquet]
-                             [--currencies USD EUR GBP ...]
+                             [--currencies EUR GBP JPY ...]
+                             [--parity A|B|AB]
+                             [--list-currencies]
 """
 
 import argparse
@@ -90,12 +107,33 @@ def _get(url: str, params: dict | None = None) -> dict:
 
 
 def fetch_currencies() -> pd.DataFrame:
-    """Return DataFrame with columns: tipoMoeda, nomeFormatado, simbolo."""
+    """
+    Return DataFrame with columns: tipoMoeda, nomeFormatado, simbolo.
+
+    tipoMoeda == "A"  →  USD-parity  (rate = USD per 1 unit of foreign currency)
+    tipoMoeda == "B"  →  BRL-parity  (rate = BRL per 1 unit of foreign currency)
+    """
     log.info("Fetching available currencies …")
     data = _get(f"{BASE_URL}/Moedas", params={"$format": "json"})
     df = pd.DataFrame(data["value"])
-    log.info("  → %d currencies found", len(df))
+    a_count = (df["tipoMoeda"] == "A").sum()
+    b_count = (df["tipoMoeda"] == "B").sum()
+    log.info(
+        "  → %d currencies found: %d type-A (USD parity), %d type-B (BRL parity)",
+        len(df), a_count, b_count,
+    )
     return df
+
+
+def list_currencies(df: pd.DataFrame) -> None:
+    """Print a formatted table of all available currencies grouped by parity type."""
+    for parity, label in [("A", "USD parity"), ("B", "BRL parity")]:
+        subset = df[df["tipoMoeda"] == parity].sort_values("simbolo")
+        print(f"\nType {parity} – {label} ({len(subset)} currencies)")
+        print(f"  {'Code':<8} {'Name'}")
+        print(f"  {'-'*6}  {'-'*40}")
+        for _, row in subset.iterrows():
+            print(f"  {row['simbolo']:<8} {row['nomeFormatado']}")
 
 
 def fetch_currency_period(currency: str, start: date, end: date) -> pd.DataFrame:
@@ -144,9 +182,18 @@ def build_dataset(
     end: date,
     currencies: list[str] | None,
     closing_only: bool = True,
+    parity: str = "A",
 ) -> pd.DataFrame:
     """
     Download FX rates for all (or selected) currencies between start and end.
+
+    Parameters
+    ----------
+    parity : "A" | "B" | "AB"
+        Which BCB currency parity types to include.
+        "A"  (default) – USD-parity currencies only (rate = USD per foreign unit).
+        "B"            – BRL-parity currencies only (rate = BRL per foreign unit).
+        "AB"           – All currencies regardless of parity type.
 
     BCB publishes up to 5 bulletins per day (Abertura, Intermediário, Fechamento, …).
     With closing_only=True (default) only the 'Fechamento' (closing) bulletin is kept,
@@ -154,14 +201,30 @@ def build_dataset(
     """
     avail = fetch_currencies()
 
-    if currencies:
-        # validate
-        unknown = set(currencies) - set(avail["simbolo"])
-        if unknown:
-            log.warning("Unknown currency codes (will be skipped): %s", ", ".join(sorted(unknown)))
-        target = [c for c in currencies if c in set(avail["simbolo"])]
+    # Filter by parity type so the dataset is internally consistent
+    parity = parity.upper()
+    if parity == "AB":
+        avail_filtered = avail
+    elif parity in ("A", "B"):
+        avail_filtered = avail[avail["tipoMoeda"] == parity]
+        log.info(
+            "Parity filter '%s': %d of %d currencies selected",
+            parity, len(avail_filtered), len(avail),
+        )
     else:
-        target = sorted(avail["simbolo"].tolist())
+        raise ValueError(f"parity must be 'A', 'B', or 'AB'; got {parity!r}")
+
+    if currencies:
+        # validate against the parity-filtered set
+        unknown = set(currencies) - set(avail_filtered["simbolo"])
+        if unknown:
+            log.warning(
+                "Currency codes not in parity-%s set (will be skipped): %s",
+                parity, ", ".join(sorted(unknown)),
+            )
+        target = [c for c in currencies if c in set(avail_filtered["simbolo"])]
+    else:
+        target = sorted(avail_filtered["simbolo"].tolist())
 
     log.info("Building dataset for %d currencies: %s … %s", len(target), start, end)
 
@@ -276,6 +339,21 @@ def parse_args() -> argparse.Namespace:
         default=CHUNK_DAYS,
         help="Days per API request per currency.",
     )
+    p.add_argument(
+        "--parity",
+        choices=["A", "B", "AB"],
+        default="A",
+        metavar="A|B|AB",
+        help=(
+            "Currency parity type to include. "
+            "A=USD-parity (default), B=BRL-parity, AB=both."
+        ),
+    )
+    p.add_argument(
+        "--list-currencies",
+        action="store_true",
+        help="Print all available currencies grouped by parity type and exit.",
+    )
     return p.parse_args()
 
 
@@ -294,6 +372,11 @@ def save(df: pd.DataFrame, path: Path, fmt: str) -> None:
 def main() -> None:
     args = parse_args()
 
+    if args.list_currencies:
+        currencies_df = fetch_currencies()
+        list_currencies(currencies_df)
+        return
+
     start = datetime.strptime(args.start, "%Y-%m-%d").date()
     end = datetime.strptime(args.end, "%Y-%m-%d").date()
     if start > end:
@@ -307,6 +390,7 @@ def main() -> None:
         end=end,
         currencies=args.currencies,
         closing_only=not args.all_bulletins,
+        parity=args.parity,
     )
 
     if df.empty:

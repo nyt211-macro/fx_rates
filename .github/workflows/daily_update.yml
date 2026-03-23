@@ -1,0 +1,61 @@
+name: Daily FX Rates Update
+
+on:
+  schedule:
+    # Run every day at 22:00 UTC (after Brazilian market close at ~21:00 UTC)
+    - cron: "0 22 * * 1-5"
+  workflow_dispatch:  # allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  update-fx-rates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pandas openpyxl pyarrow
+
+      - name: Fetch FX rates (Excel – both parities)
+        run: |
+          python fetch_fx_rates.py \
+            --start 2000-01-01 \
+            --format excel \
+            --output data/fx_rates
+
+      - name: Fetch FX rates (CSV – USD parity)
+        run: |
+          python fetch_fx_rates.py \
+            --start 2000-01-01 \
+            --format csv \
+            --parity A \
+            --output data/fx_rates_usd
+
+      - name: Fetch FX rates (CSV – BRL parity)
+        run: |
+          python fetch_fx_rates.py \
+            --start 2000-01-01 \
+            --format csv \
+            --parity B \
+            --output data/fx_rates_brl
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: daily FX rates update ($(date -u +%Y-%m-%d))"
+            git push
+          fi

@@ -286,6 +286,48 @@ def pivot_wide(df: pd.DataFrame, rate: str = "sell_rate") -> pd.DataFrame:
     )
 
 
+def build_excel(
+    start: date,
+    end: date,
+    output: Path,
+    closing_only: bool = True,
+) -> None:
+    """
+    Build an Excel workbook with two sheets:
+      - 'USD Parity' (type-A currencies, wide format)
+      - 'BRL Parity' (type-B currencies, wide format)
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    out_path = output.with_suffix(".xlsx")
+
+    log.info("Building Excel workbook with USD + BRL parity tabs …")
+
+    df_usd = build_dataset(start=start, end=end, currencies=None,
+                           closing_only=closing_only, parity="A")
+    df_brl = build_dataset(start=start, end=end, currencies=None,
+                           closing_only=closing_only, parity="B")
+
+    wide_usd = pivot_wide(df_usd) if not df_usd.empty else pd.DataFrame()
+    wide_brl = pivot_wide(df_brl) if not df_brl.empty else pd.DataFrame()
+
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        if not wide_usd.empty:
+            wide_usd.to_excel(writer, sheet_name="USD Parity", index=False)
+            log.info("  USD Parity: %d rows × %d cols", len(wide_usd), len(wide_usd.columns))
+        else:
+            pd.DataFrame({"info": ["No USD-parity data found"]}).to_excel(
+                writer, sheet_name="USD Parity", index=False)
+
+        if not wide_brl.empty:
+            wide_brl.to_excel(writer, sheet_name="BRL Parity", index=False)
+            log.info("  BRL Parity: %d rows × %d cols", len(wide_brl), len(wide_brl.columns))
+        else:
+            pd.DataFrame({"info": ["No BRL-parity data found"]}).to_excel(
+                writer, sheet_name="BRL Parity", index=False)
+
+    log.info("Saved Excel → %s", out_path)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -312,9 +354,9 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--format",
-        choices=["csv", "parquet", "both"],
+        choices=["csv", "parquet", "both", "excel"],
         default="csv",
-        help="Output format",
+        help="Output format. 'excel' produces an .xlsx with USD + BRL parity tabs.",
     )
     p.add_argument(
         "--currencies",
@@ -385,6 +427,18 @@ def main() -> None:
     global CHUNK_DAYS
     CHUNK_DAYS = args.chunk_days
 
+    output = Path(args.output)
+
+    if args.format == "excel":
+        build_excel(
+            start=start,
+            end=end,
+            output=output,
+            closing_only=not args.all_bulletins,
+        )
+        log.info("Done.")
+        return
+
     df = build_dataset(
         start=start,
         end=end,
@@ -397,7 +451,6 @@ def main() -> None:
         log.warning("Empty dataset – nothing saved.")
         return
 
-    output = Path(args.output)
     save(df, output, args.format)
 
     if args.wide:
